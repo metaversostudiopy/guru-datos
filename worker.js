@@ -48,6 +48,18 @@ async function apiGet(path, key){
   return j.response || [];
 }
 
+// igual que apiGet pero además devuelve el texto de error (p.ej. límite) para diagnóstico
+async function apiGet2(path, key){
+  const r = await fetch(API_BASE + path, { headers: { "x-apisports-key": key } });
+  const j = await r.json();
+  let err = "";
+  if (j.errors) {
+    if (Array.isArray(j.errors)) err = j.errors.join("; ");
+    else err = Object.values(j.errors).filter(Boolean).join("; ");
+  }
+  return { data: j.response || [], err };
+}
+
 /* ----------- CUOTAS: helpers para leer el /odds de API-Football -----------
    La respuesta trae varios "bookmakers", cada uno con "bets" (mercados),
    y cada bet con "values" ({value, odd}). Elegimos UNA casa y sacamos
@@ -178,7 +190,16 @@ export default {
         dbg = { tsc: tscRaw, inj: injRaw, equiposConGol: Object.keys(scorersByTeam).length };
 
 
-        const fx = await apiGet(`/fixtures?league=${LEAGUE}&season=${SEASON}`, key);
+        // PARTIDOS: primero pido todos; si vienen vacíos (límite a la llamada pesada),
+        // tiro de un respaldo liviano con solo los próximos.
+        let fxR = await apiGet2(`/fixtures?league=${LEAGUE}&season=${SEASON}`, key);
+        let fx = fxR.data, fxSrc = "all", fxErr = fxR.err;
+        if (!fx.length) {
+          const fb = await apiGet2(`/fixtures?league=${LEAGUE}&season=${SEASON}&next=40`, key);
+          if (fb.data.length) { fx = fb.data; fxSrc = "next40"; }
+          if (fb.err) fxErr = (fxErr ? fxErr + " | " : "") + "next:" + fb.err;
+        }
+        dbg.fx = fx.length; dbg.fxSrc = fxSrc; dbg.fxErr = fxErr;
         // ordeno por fecha; marco los próximos no jugados para pedirles predicción + cuotas
         const noJugado = s => ["NS","TBD","PST"].includes(s);
         const upcoming = fx.filter(f => noJugado(f.fixture.status.short))
@@ -216,8 +237,8 @@ export default {
         });
       }
 
-      // ¿la respuesta vino completa? (si no hay llave, no exigimos fixtures)
-      const completo = (!key) || (fixtures.length > 0 && dbg.tsc > 0);
+      // ¿la respuesta vino completa? lo esencial son los partidos; los goleadores son un extra
+      const completo = (!key) || (fixtures.length > 0);
       const body = JSON.stringify({ actualizado: new Date().toISOString(), conLlave: !!key, completo, dbg, elo, standings, fixtures });
 
       if(completo){
