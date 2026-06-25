@@ -1,7 +1,8 @@
 /* ============================================================
    ORÁCULO MUNDIAL — Worker de datos en vivo
    Combina:  Elo de eloratings.net (gratis, sin llave)
-           + API-Football (fixtures, resultados y posiciones)
+           + API-Football (fixtures, resultados, posiciones,
+             predicción y CUOTAS reales de casa de apuestas)
    Devuelve JSON en  /datos  y cachea para no gastar pedidos.
 
    CÓMO USARLO:
@@ -10,6 +11,12 @@
         Nombre:  API_FOOTBALL_KEY     Valor: (tu llave de API-Football)
       (Es un SECRETO. No lo pegues en ningún otro lado.)
    3. Probá abriendo:  https://TU-WORKER.workers.dev/datos
+
+   NOVEDAD: cada próximo partido trae ahora "odds" con la cuota real
+   de una casa grande (Bet365 si está, si no la primera disponible):
+     odds = { casa, r:{h,d,a}, dc:{hd,ha,da}, ou25:{o,u}, btts:{s,n} }
+   Si un partido no tiene cuota, odds queda en null y la app usa la
+   "cuota justa" (1 / probabilidad) como referencia.
 ============================================================ */
 
 const API_BASE = "https://v3.football.api-sports.io";
@@ -39,6 +46,63 @@ async function apiGet(path, key){
   const r = await fetch(API_BASE + path, { headers: { "x-apisports-key": key } });
   const j = await r.json();
   return j.response || [];
+}
+
+/* ----------- CUOTAS: helpers para leer el /odds de API-Football -----------
+   La respuesta trae varios "bookmakers", cada uno con "bets" (mercados),
+   y cada bet con "values" ({value, odd}). Elegimos UNA casa y sacamos
+   solo los 4 mercados que la app entiende. Todo a prueba de faltantes. */
+function oddNum(x){ const n = parseFloat(x); return isFinite(n) ? n : null; }
+
+function pickBookmaker(bms){
+  if(!Array.isArray(bms) || !bms.length) return null;
+  const tiene1x2 = bm => (bm.bets||[]).some(b => /match winner/i.test(b.name||""));
+  return bms.find(bm => /bet365/i.test(bm.name||"") && tiene1x2(bm))
+      || bms.find(tiene1x2)
+      || bms[0];
+}
+function findBet(bets, rx){ return (bets||[]).find(b => rx.test(b.name||"")); }
+function betVal(bet, rx){
+  const v = (bet && bet.values || []).find(x => rx.test(String(x.value)));
+  return v ? oddNum(v.odd) : null;
+}
+
+// Convierte la respuesta de /odds de UN partido en nuestro formato chico.
+function mapOdds(resp){
+  const entry = Array.isArray(resp) ? resp[0] : null;
+  const bm = pickBookmaker(entry && entry.bookmakers);
+  if(!bm) return null;
+  const bets = bm.bets || [];
+  const out = { casa: bm.name || "Casa" };
+  let any = false;
+
+  // 1X2 (Resultado)
+  const mw = findBet(bets, /match winner/i) || findBet(bets, /^1x2$/i);
+  if(mw){
+    const h = betVal(mw, /^home$/i), d = betVal(mw, /^draw$/i), a = betVal(mw, /^away$/i);
+    if(h || d || a){ out.r = { h, d, a }; any = true; }
+  }
+  // Doble oportunidad
+  const dc = findBet(bets, /double chance/i);
+  if(dc){
+    const hd = betVal(dc, /home\/draw|^1x$/i);   // 1X
+    const ha = betVal(dc, /home\/away|^12$/i);   // 12
+    const da = betVal(dc, /draw\/away|^x2$/i);   // X2
+    if(hd || ha || da){ out.dc = { hd, ha, da }; any = true; }
+  }
+  // Más / Menos 2.5 goles
+  const ou = findBet(bets, /goals over\/under|over\/under/i);
+  if(ou){
+    const o = betVal(ou, /over 2\.5/i), u = betVal(ou, /under 2\.5/i);
+    if(o || u){ out.ou25 = { o, u }; any = true; }
+  }
+  // Ambos marcan
+  const bt = findBet(bets, /both teams (to )?score/i);
+  if(bt){
+    const s = betVal(bt, /^yes$/i), n = betVal(bt, /^no$/i);
+    if(s || n){ out.btts = { s, n }; any = true; }
+  }
+  return any ? out : null;
 }
 
 export default {
@@ -76,19 +140,25 @@ export default {
         }));
 
         const fx = await apiGet(`/fixtures?league=${LEAGUE}&season=${SEASON}`, key);
-        // ordeno por fecha; marco los próximos no jugados para pedirles predicción
+        // ordeno por fecha; marco los próximos no jugados para pedirles predicción + cuotas
         const noJugado = s => ["NS","TBD","PST"].includes(s);
         const upcoming = fx.filter(f => noJugado(f.fixture.status.short))
                            .sort((a,b)=> new Date(a.fixture.date) - new Date(b.fixture.date))
                            .slice(0, 16);
-        const predIds = new Set(upcoming.map(f => f.fixture.id));
-        // pido la PREDICCIÓN de la API solo para esos próximos (cachea, no gasta de más)
+        // pido la PREDICCIÓN y las CUOTAS de la API solo para esos próximos (cachea, no gasta de más)
         const preds = {};
+        const odds  = {};
         for(const f of upcoming){
+          const id = f.fixture.id;
           try{
-            const pr = await apiGet(`/predictions?fixture=${f.fixture.id}`, key);
+            const pr = await apiGet(`/predictions?fixture=${id}`, key);
             const p = pr[0]?.predictions;
-            if(p) preds[f.fixture.id] = { home:p.percent?.home, draw:p.percent?.draw, away:p.percent?.away, advice:p.advice };
+            if(p) preds[id] = { home:p.percent?.home, draw:p.percent?.draw, away:p.percent?.away, advice:p.advice };
+          }catch(e){}
+          try{
+            const od = await apiGet(`/odds?fixture=${id}&league=${LEAGUE}&season=${SEASON}`, key);
+            const m = mapOdds(od);
+            if(m) odds[id] = m;
           }catch(e){}
         }
         fixtures = fx.map(f => ({
@@ -96,7 +166,8 @@ export default {
           group: f.league.round,
           home: f.teams.home.name, away: f.teams.away.name,
           gh: f.goals.home, ga: f.goals.away,
-          pred: preds[f.fixture.id] || null
+          pred: preds[f.fixture.id] || null,
+          odds: odds[f.fixture.id] || null
         }));
       }
 
