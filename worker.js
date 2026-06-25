@@ -139,6 +139,36 @@ export default {
           });
         }));
 
+        // GOLEADORES + TIROS por jugador (una sola llamada; trae goles, tiros y minutos)
+        const scorersByTeam = {};
+        try{
+          const ts = await apiGet(`/players/topscorers?league=${LEAGUE}&season=${SEASON}`, key);
+          ts.forEach(p => {
+            const st = (p.statistics && p.statistics[0]) || {};
+            const tid = st.team && st.team.id; if(!tid) return;
+            (scorersByTeam[tid] = scorersByTeam[tid] || []).push({
+              n:  p.player && p.player.name,
+              g:  (st.goals && st.goals.total) || 0,
+              s:  (st.shots && st.shots.total) || 0,
+              so: (st.shots && st.shots.on) || 0,
+              min:(st.games && st.games.minutes) || 0,
+              ap: (st.games && st.games.appearences) || 0
+            });
+          });
+        }catch(e){}
+
+        // LESIONADOS / dudas por equipo (una sola llamada)
+        const injByTeam = {};
+        try{
+          const ij = await apiGet(`/injuries?league=${LEAGUE}&season=${SEASON}`, key);
+          ij.forEach(x => {
+            const tid = x.team && x.team.id; if(!tid) return;
+            const nom = x.player && x.player.name; if(!nom) return;
+            (injByTeam[tid] = injByTeam[tid] || []);
+            if(!injByTeam[tid].includes(nom)) injByTeam[tid].push(nom);
+          });
+        }catch(e){}
+
         const fx = await apiGet(`/fixtures?league=${LEAGUE}&season=${SEASON}`, key);
         // ordeno por fecha; marco los próximos no jugados para pedirles predicción + cuotas
         const noJugado = s => ["NS","TBD","PST"].includes(s);
@@ -161,14 +191,20 @@ export default {
             if(m) odds[id] = m;
           }catch(e){}
         }
-        fixtures = fx.map(f => ({
-          id: f.fixture.id, date: f.fixture.date, status: f.fixture.status.short,
-          group: f.league.round,
-          home: f.teams.home.name, away: f.teams.away.name,
-          gh: f.goals.home, ga: f.goals.away,
-          pred: preds[f.fixture.id] || null,
-          odds: odds[f.fixture.id] || null
-        }));
+        fixtures = fx.map(f => {
+          const up = noJugado(f.fixture.status.short);
+          const hid = f.teams.home.id, aid = f.teams.away.id;
+          return {
+            id: f.fixture.id, date: f.fixture.date, status: f.fixture.status.short,
+            group: f.league.round,
+            home: f.teams.home.name, away: f.teams.away.name,
+            gh: f.goals.home, ga: f.goals.away,
+            pred: preds[f.fixture.id] || null,
+            odds: odds[f.fixture.id] || null,
+            players: up ? { home: scorersByTeam[hid] || [], away: scorersByTeam[aid] || [] } : null,
+            bajas:   up ? { home: injByTeam[hid] || [],    away: injByTeam[aid] || [] }    : null
+          };
+        });
       }
 
       const body = JSON.stringify({ actualizado: new Date().toISOString(), conLlave: !!key, elo, standings, fixtures });
