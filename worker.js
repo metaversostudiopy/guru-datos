@@ -216,10 +216,22 @@ export default {
         });
       }
 
-      const body = JSON.stringify({ actualizado: new Date().toISOString(), conLlave: !!key, dbg, elo, standings, fixtures });
-      const toCache = new Response(body, { headers: { ...cors, "Cache-Control": `max-age=${CACHE_MIN*60}` } });
-      await cache.put(cacheKey, toCache.clone());
-      return new Response(body, { headers: cors });
+      // ¿la respuesta vino completa? (si no hay llave, no exigimos fixtures)
+      const completo = (!key) || (fixtures.length > 0 && dbg.tsc > 0);
+      const body = JSON.stringify({ actualizado: new Date().toISOString(), conLlave: !!key, completo, dbg, elo, standings, fixtures });
+
+      if(completo){
+        // resultado bueno: lo guardo 20 min
+        const toCache = new Response(body, { headers: { ...cors, "Cache-Control": `max-age=${CACHE_MIN*60}` } });
+        await cache.put(cacheKey, toCache.clone());
+        return new Response(body, { headers: cors });
+      }
+
+      // incompleto (probable límite por minuto): NO piso la caché.
+      // si tengo una versión buena guardada, la devuelvo en vez de una vacía.
+      const prev = await cache.match(cacheKey);
+      if(prev) return prev;
+      return new Response(body, { headers: { ...cors, "Cache-Control": "max-age=15" } });
 
     }catch(e){
       return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 500, headers: cors });
