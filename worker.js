@@ -126,7 +126,7 @@ export default {
     try{
       const key = env.API_FOOTBALL_KEY;
       const elo = await getElo();
-      let standings = [], fixtures = [];
+      let standings = [], fixtures = [], dbg = { tsc:0, inj:0, equiposConGol:0 };
 
       if(key){
         const st = await apiGet(`/standings?league=${LEAGUE}&season=${SEASON}`, key);
@@ -141,10 +141,14 @@ export default {
 
         // GOLEADORES + TIROS por jugador (una sola llamada; trae goles, tiros y minutos)
         const scorersByTeam = {};
+        let tscRaw = 0;
         try{
           const ts = await apiGet(`/players/topscorers?league=${LEAGUE}&season=${SEASON}`, key);
+          tscRaw = ts.length;
           ts.forEach(p => {
-            const st = (p.statistics && p.statistics[0]) || {};
+            const stats = p.statistics || [];
+            // elijo la estadística de ESTE torneo (no la del club), si existe
+            const st = stats.find(x => x && x.league && x.league.id === LEAGUE) || stats[0] || {};
             const tid = st.team && st.team.id; if(!tid) return;
             (scorersByTeam[tid] = scorersByTeam[tid] || []).push({
               n:  p.player && p.player.name,
@@ -159,8 +163,10 @@ export default {
 
         // LESIONADOS / dudas por equipo (una sola llamada)
         const injByTeam = {};
+        let injRaw = 0;
         try{
           const ij = await apiGet(`/injuries?league=${LEAGUE}&season=${SEASON}`, key);
+          injRaw = ij.length;
           ij.forEach(x => {
             const tid = x.team && x.team.id; if(!tid) return;
             const nom = x.player && x.player.name; if(!nom) return;
@@ -168,6 +174,9 @@ export default {
             if(!injByTeam[tid].includes(nom)) injByTeam[tid].push(nom);
           });
         }catch(e){}
+
+        dbg = { tsc: tscRaw, inj: injRaw, equiposConGol: Object.keys(scorersByTeam).length };
+
 
         const fx = await apiGet(`/fixtures?league=${LEAGUE}&season=${SEASON}`, key);
         // ordeno por fecha; marco los próximos no jugados para pedirles predicción + cuotas
@@ -207,7 +216,7 @@ export default {
         });
       }
 
-      const body = JSON.stringify({ actualizado: new Date().toISOString(), conLlave: !!key, elo, standings, fixtures });
+      const body = JSON.stringify({ actualizado: new Date().toISOString(), conLlave: !!key, dbg, elo, standings, fixtures });
       const toCache = new Response(body, { headers: { ...cors, "Cache-Control": `max-age=${CACHE_MIN*60}` } });
       await cache.put(cacheKey, toCache.clone());
       return new Response(body, { headers: cors });
