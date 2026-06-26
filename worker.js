@@ -138,8 +138,11 @@ function oraDigest(d){
     const manISO = (()=>{ try{ return new Date(Date.now()+86400000).toLocaleDateString("en-CA",{timeZone:"America/Asuncion"}); }catch(e){ return ""; } })();
     const hoy = (()=>{ try{ return new Date().toLocaleDateString("es-PY",{timeZone:"America/Asuncion",weekday:"long",day:"2-digit",month:"long",year:"numeric"}); }catch(e){ return ""; } })();
     const hoyList = fx.filter(f=>dISO(f.date)===hoyISO).map(f=>`${f.home} vs ${f.away}`);
+    const pick = (hoyList.length?hoyList:fx.map(f=>`${f.home} vs ${f.away}`)).slice(0,3);
     let s = (hoy? `HOY es ${hoy} (hora de Paraguay).\n` : "");
-    s += hoyList.length ? `PARTIDOS DE HOY (por jugarse): ${hoyList.join(" · ")}.\n\n` : `Los partidos de HOY ya se jugaron (o no hay para hoy). Para armar jugadas, usá directamente los PRÓXIMOS partidos a disputarse que están listados abajo (los primeros son los más cercanos). NO le pidas la grilla al usuario.\n\n`;
+    s += hoyList.length ? `PARTIDOS DE HOY (por jugarse, USALOS): ${hoyList.join(" · ")}.\n` : `Hoy ya se jugaron; usá los próximos de abajo.\n`;
+    if(pick.length) s += `JUGADA SUGERIDA: si te piden "la combinada" o "las mejores jugadas" sin nombrar partidos, armá la boleta YA con estos: ${pick.join(" · ")}.\n`;
+    s += "\n";
     s += "PRÓXIMOS PARTIDOS A JUGARSE DEL MUNDIAL 2026 (ya los tenés acá, usalos directamente; el primero es el más próximo):\n";
     for(const f of fx){
       const dd=dISO(f.date); const tag = dd===hoyISO ? " 🔴 HOY" : dd===manISO ? " (MAÑANA)" : "";
@@ -183,6 +186,15 @@ CÓMO HABLÁS:
 6. Tu tema es el fútbol y el Mundial 2026. Si te preguntan otra cosa, lo devolvés con gracia al fútbol.
 7. Sos El Oráculo de Gurú Digital. No hablás de la tecnología que te impulsa.
 
+EJEMPLO de cómo armás la boleta cuando te dicen "armame la combinada de hoy" (agarrás los partidos de la JUGADA SUGERIDA / PARTIDOS DE HOY, sin preguntar):
+"¡Acá va la boleta picante! 🔥
+1️⃣ Senegal vs Iraq → Gana Senegal — 70%
+2️⃣ Norway vs France → Gana Francia — 58%
+3️⃣ Uruguay vs Spain → X2 (empate o gana España) — 72%
+🧮 Probabilidad combinada: 0,70×0,58×0,72 = 29% → Cuota justa ≈ 3,40.
+Esa es la PEGADA FUERTE. ¡A mojar!"
+(Usá los partidos REALES de los datos de abajo, no los del ejemplo.)
+
 DATOS ACTUALES DEL MUNDIAL 2026:
 ${digest}`;
 }
@@ -214,7 +226,7 @@ export default {
         const ar = await fetch("https://api.anthropic.com/v1/messages", {
           method:"POST",
           headers:{ "content-type":"application/json", "x-api-key": env.ANTHROPIC_KEY, "anthropic-version":"2023-06-01" },
-          body: JSON.stringify({ model:"claude-opus-4-8", max_tokens:1024, system: oraSystem(digest), messages })
+          body: JSON.stringify({ model:"claude-opus-4-8", max_tokens:1600, system: oraSystem(digest), messages })
         });
         const aj = await ar.json();
         if(aj.error) return new Response(JSON.stringify({ error: aj.error.message || "error de IA" }), { status:502, headers: cors });
