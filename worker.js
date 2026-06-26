@@ -213,14 +213,15 @@ export default {
       const message = (body.message||"").toString().slice(0, 1500);
       let history = Array.isArray(body.history) ? body.history.slice(-10) : [];
       if(!message) return new Response(JSON.stringify({ error:"mensaje vacío" }), { status:400, headers: cors });
-      // datos del torneo para fundamentar la respuesta
+      // datos del torneo para fundamentar la respuesta.
+      // Leemos del KV PRIMERO (cofre durable que /datos mantiene), luego memoria, y recién al final
+      // el auto-pedido a /datos. Así el chat SIEMPRE tiene los partidos, sin depender del self-fetch.
       let digest = "(sin datos)";
-      try{
-        const dr = await fetch(url.origin + "/datos");
-        let d = await dr.json();
-        if((!d.fixtures || !d.fixtures.length) && LAST_GOOD){ try{ d = JSON.parse(LAST_GOOD); }catch(e){} }
-        digest = oraDigest(d);
-      }catch(e){ if(LAST_GOOD){ try{ digest = oraDigest(JSON.parse(LAST_GOOD)); }catch(e2){} } }
+      let d = null;
+      try{ if(env.DATOS_KV){ const kv = await env.DATOS_KV.get("datos"); if(kv) d = JSON.parse(kv); } }catch(e){}
+      if((!d || !d.fixtures || !d.fixtures.length) && LAST_GOOD){ try{ d = JSON.parse(LAST_GOOD); }catch(e){} }
+      if(!d || !d.fixtures || !d.fixtures.length){ try{ const dr = await fetch(url.origin + "/datos"); d = await dr.json(); }catch(e){} }
+      try{ if(d && d.fixtures && d.fixtures.length) digest = oraDigest(d); }catch(e){}
       const messages = [...history.filter(m=>m && (m.role==="user"||m.role==="assistant") && m.content), { role:"user", content: message }];
       try{
         const ar = await fetch("https://api.anthropic.com/v1/messages", {
