@@ -24,6 +24,9 @@ const LEAGUE   = 1;      // Copa del Mundo en API-Football
 const SEASON   = 2026;
 const CACHE_MIN = 45;    // minutos de caché (cuidar el límite de pedidos)
 
+// Última copia BUENA de /datos en memoria del worker (respaldo anti-parpadeo, sin configurar nada).
+let LAST_GOOD = null;
+
 // ====== CANDADO DE SERVICIO ======
 // Fecha de vencimiento del servicio (formato AÑO-MES-DÍA).
 // Para renovar: cambiá SOLO esta fecha y subí el worker a GitHub.
@@ -196,7 +199,12 @@ export default {
       if(!message) return new Response(JSON.stringify({ error:"mensaje vacío" }), { status:400, headers: cors });
       // datos del torneo para fundamentar la respuesta
       let digest = "(sin datos)";
-      try{ const dr = await fetch(url.origin + "/datos"); const d = await dr.json(); digest = oraDigest(d); }catch(e){}
+      try{
+        const dr = await fetch(url.origin + "/datos");
+        let d = await dr.json();
+        if((!d.fixtures || !d.fixtures.length) && LAST_GOOD){ try{ d = JSON.parse(LAST_GOOD); }catch(e){} }
+        digest = oraDigest(d);
+      }catch(e){ if(LAST_GOOD){ try{ digest = oraDigest(JSON.parse(LAST_GOOD)); }catch(e2){} } }
       const messages = [...history.filter(m=>m && (m.role==="user"||m.role==="assistant") && m.content), { role:"user", content: message }];
       try{
         const ar = await fetch("https://api.anthropic.com/v1/messages", {
@@ -337,12 +345,19 @@ export default {
         const toCache = new Response(body, { headers: { ...cors, "Cache-Control": `max-age=${CACHE_MIN*60}` } });
         await cache.put(cacheKey, toCache.clone());
         try{ if(env.DATOS_KV) await env.DATOS_KV.put("datos", body, { expirationTtl: 86400 }); }catch(e){}
+        LAST_GOOD = body;
         return new Response(body, { headers: cors });
       }
 
       // incompleto (límite de la API): sirvo el último respaldo BUENO que tenga.
       const prev = await cache.match(cacheKey);
       if(prev) return prev;
+      // respaldo en memoria del worker (anti-parpadeo, sin configurar nada)
+      if(LAST_GOOD){
+        const r = new Response(LAST_GOOD, { headers: { ...cors, "Cache-Control": "max-age=600" } });
+        try{ await cache.put(cacheKey, r.clone()); }catch(e){}
+        return r;
+      }
       // respaldo durable en KV: si ya cargó bien alguna vez, lo uso (y lo dejo en borde 10 min)
       try{
         if(env.DATOS_KV){
