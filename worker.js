@@ -130,10 +130,17 @@ function oraDigest(d){
     const noJug = s => ["NS","TBD","PST"].includes(s);
     const fd = iso => { try{ return new Date(iso).toLocaleString("es-PY",{timeZone:"America/Asuncion",weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(e){ return iso; } };
     const fx = (d.fixtures||[]).filter(f=>noJug(f.status)).sort((a,b)=>new Date(a.date)-new Date(b.date)).slice(0,16);
+    const dISO = iso => { try{ return new Date(iso).toLocaleDateString("en-CA",{timeZone:"America/Asuncion"}); }catch(e){ return ""; } };
+    const hoyISO = (()=>{ try{ return new Date().toLocaleDateString("en-CA",{timeZone:"America/Asuncion"}); }catch(e){ return ""; } })();
+    const manISO = (()=>{ try{ return new Date(Date.now()+86400000).toLocaleDateString("en-CA",{timeZone:"America/Asuncion"}); }catch(e){ return ""; } })();
     const hoy = (()=>{ try{ return new Date().toLocaleDateString("es-PY",{timeZone:"America/Asuncion",weekday:"long",day:"2-digit",month:"long",year:"numeric"}); }catch(e){ return ""; } })();
-    let s = (hoy? `HOY es ${hoy} (hora de Paraguay).\n\n` : "") + "PARTIDOS PRÓXIMOS DEL MUNDIAL 2026 (ya los tenés acá; usalos):\n";
+    const hoyList = fx.filter(f=>dISO(f.date)===hoyISO).map(f=>`${f.home} vs ${f.away}`);
+    let s = (hoy? `HOY es ${hoy} (hora de Paraguay).\n` : "");
+    s += hoyList.length ? `PARTIDOS DE HOY: ${hoyList.join(" · ")}.\n\n` : `Hoy no hay partidos en la grilla; los próximos están más abajo.\n\n`;
+    s += "PARTIDOS PRÓXIMOS DEL MUNDIAL 2026 (ya los tenés acá; usalos directamente):\n";
     for(const f of fx){
-      s += `• ${f.home} vs ${f.away} — ${fd(f.date)}`;
+      const dd=dISO(f.date); const tag = dd===hoyISO ? " 🔴 HOY" : dd===manISO ? " (MAÑANA)" : "";
+      s += `• ${f.home} vs ${f.away} — ${fd(f.date)}${tag}`;
       if(f.pred && f.pred.home!=null) s += ` [modelo: local ${f.pred.home}, empate ${f.pred.draw}, visitante ${f.pred.away}]`;
       if(f.odds && f.odds.r) s += ` [cuota casa: ${f.odds.r.h}/${f.odds.r.d}/${f.odds.r.a}]`;
       s += "\n";
