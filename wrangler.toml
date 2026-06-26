@@ -1,4 +1,8 @@
 name = "guru-datos"
 main = "worker.js"
 compatibility_date = "2026-06-25"
-# deploy
+
+# Memoria durable KV (respaldo de datos anti-parpadeo)
+[[kv_namespaces]]
+binding = "DATOS_KV"
+id = "7a29f811872b4e6db8aba8445a6057b5"
