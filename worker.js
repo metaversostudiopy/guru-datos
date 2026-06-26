@@ -214,7 +214,7 @@ export default {
         const ar = await fetch("https://api.anthropic.com/v1/messages", {
           method:"POST",
           headers:{ "content-type":"application/json", "x-api-key": env.ANTHROPIC_KEY, "anthropic-version":"2023-06-01" },
-          body: JSON.stringify({ model:"claude-opus-4-8", max_tokens:1024, temperature:0.6, system: oraSystem(digest), messages })
+          body: JSON.stringify({ model:"claude-opus-4-8", max_tokens:1024, system: oraSystem(digest), messages })
         });
         const aj = await ar.json();
         if(aj.error) return new Response(JSON.stringify({ error: aj.error.message || "error de IA" }), { status:502, headers: cors });
