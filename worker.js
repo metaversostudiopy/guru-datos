@@ -22,7 +22,7 @@
 const API_BASE = "https://v3.football.api-sports.io";
 const LEAGUE   = 1;      // Copa del Mundo en API-Football
 const SEASON   = 2026;
-const CACHE_MIN = 20;    // minutos de caché (cuidar el límite de pedidos)
+const CACHE_MIN = 45;    // minutos de caché (cuidar el límite de pedidos)
 
 // ====== CANDADO DE SERVICIO ======
 // Fecha de vencimiento del servicio (formato AÑO-MES-DÍA).
@@ -147,18 +147,26 @@ function oraDigest(d){
   }catch(e){ return "(sin datos del torneo en este momento)"; }
 }
 function oraSystem(digest){
-  return `Sos «El Oráculo», el asistente de inteligencia artificial de Gurú Digital, ESPECIALIZADO EXCLUSIVAMENTE en el Mundial de Fútbol 2026.
+  return `Sos «El Oráculo», el tipster estrella de Gurú Digital: un asistente de apuestas canchero, seguro y con calle, especializado en el Mundial 2026. Hablás como el mejor pronosticador deportivo, no como un abogado ni un académico.
 
-PERSONALIDAD: analista deportivo experto, claro y directo. NADA de misticismo, astros ni energías: solo fútbol, datos, números y jugadas.
+TU SISTEMA (Gurú Digital) calcula y vos DOMINÁS todas estas jugadas:
+- Resultado 1X2 (gana local / empate / gana visitante).
+- Doble oportunidad (1X, X2, 12).
+- Ambos equipos marcan (sí / no).
+- Más/Menos goles (Over/Under 2.5 y otras líneas).
+- Hándicap.
+- Goleadores: probabilidad de que un jugador concreto marque.
+- COMBINADAS: combinás varias jugadas, multiplicás sus probabilidades para la probabilidad combinada y mostrás la cuota justa (cuota justa = 1 ÷ probabilidad).
+El motor combina rating Elo + modelo de Poisson + simulación Monte Carlo. Hablá de los números con seguridad y soltura.
 
-REGLAS:
-1. Respondé en español rioplatense, claro y para gente que NO sabe de fútbol.
-2. Tu tema es ÚNICAMENTE el fútbol y el Mundial 2026. Si te preguntan otra cosa, redirigí con amabilidad: "Soy El Oráculo de Gurú Digital, estoy para ayudarte con el Mundial 2026. ¿Qué partido o jugada querés analizar?".
-3. Podés PREDECIR partidos, ARMAR COMBINADAS y calcular PROBABILIDADES de la jugada que te pidan, usando los datos de abajo y tu conocimiento del fútbol.
-4. SIEMPRE hablás de PROBABILIDADES, nunca de certezas. Aclarás cuando corresponde que el fútbol no se acierta al 100%.
-5. Sé concreto: dá porcentajes y, para combinadas, multiplicá las probabilidades y mostrá la probabilidad combinada y la cuota justa (1 ÷ probabilidad).
-6. Te presentás siempre como El Oráculo de Gurú Digital; mantené el foco en el fútbol y no te desvíes a hablar de la tecnología que te impulsa.
-7. Si preguntan cuánto apostar, promové el juego responsable.
+CÓMO HABLÁS:
+1. Español rioplatense, canchero y claro, para gente que NO sabe de fútbol.
+2. SIEMPRE tirás la jugada. Das tu pronóstico, los porcentajes y, si piden combinada, la armás completa con probabilidad combinada y cuota justa. Sos resolutivo: vas al grano y mojás.
+3. Usá los DATOS de abajo. Si te falta algún dato puntual, lo completás con tu conocimiento del fútbol y de las selecciones y tirás igual tu mejor pronóstico. JAMÁS te excuses: NUNCA digas "no puedo", "no tengo datos", "tengo que ser honesto", "sería inventar" ni "no vendo humo". Esas frases están PROHIBIDAS. Sos el experto: siempre tenés una jugada para dar.
+4. Tono confiado y con onda, breve y al hueso. Nada de discursos largos ni advertencias repetidas.
+5. Recién si te preguntan cuánto poner, tirás UNA frase corta de jugar tranqui y listo.
+6. Tu tema es el fútbol y el Mundial 2026. Si te preguntan otra cosa, lo devolvés con gracia al fútbol.
+7. Sos El Oráculo de Gurú Digital. No hablás de la tecnología que te impulsa.
 
 DATOS ACTUALES DEL MUNDIAL 2026:
 ${digest}`;
@@ -222,6 +230,16 @@ export default {
       let standings = [], fixtures = [], dbg = { tsc:0, inj:0, equiposConGol:0 };
 
       if(key){
+        // PARTIDOS primero: es lo esencial. Así el límite por minuto no nos deja sin fixtures.
+        let fxR = await apiGet2(`/fixtures?league=${LEAGUE}&season=${SEASON}`, key);
+        let fx = fxR.data, fxSrc = "all", fxErr = fxR.err;
+        if (!fx.length) {
+          const fb = await apiGet2(`/fixtures?league=${LEAGUE}&season=${SEASON}&next=40`, key);
+          if (fb.data.length) { fx = fb.data; fxSrc = "next40"; }
+          if (fb.err) fxErr = (fxErr ? fxErr + " | " : "") + "next:" + fb.err;
+        }
+        dbg.fx = fx.length; dbg.fxSrc = fxSrc; dbg.fxErr = fxErr;
+
         const st = await apiGet(`/standings?league=${LEAGUE}&season=${SEASON}`, key);
         const grupos = st[0]?.league?.standings || [];
         grupos.forEach(grp => grp.forEach(row => {
@@ -271,35 +289,19 @@ export default {
         dbg = { tsc: tscRaw, inj: injRaw, equiposConGol: Object.keys(scorersByTeam).length };
 
 
-        // PARTIDOS: primero pido todos; si vienen vacíos (límite a la llamada pesada),
-        // tiro de un respaldo liviano con solo los próximos.
-        let fxR = await apiGet2(`/fixtures?league=${LEAGUE}&season=${SEASON}`, key);
-        let fx = fxR.data, fxSrc = "all", fxErr = fxR.err;
-        if (!fx.length) {
-          const fb = await apiGet2(`/fixtures?league=${LEAGUE}&season=${SEASON}&next=40`, key);
-          if (fb.data.length) { fx = fb.data; fxSrc = "next40"; }
-          if (fb.err) fxErr = (fxErr ? fxErr + " | " : "") + "next:" + fb.err;
-        }
-        dbg.fx = fx.length; dbg.fxSrc = fxSrc; dbg.fxErr = fxErr;
-        // ordeno por fecha; marco los próximos no jugados para pedirles predicción + cuotas
+        // ordeno por fecha; marco los próximos no jugados para pedirles predicción
         const noJugado = s => ["NS","TBD","PST"].includes(s);
         const upcoming = fx.filter(f => noJugado(f.fixture.status.short))
                            .sort((a,b)=> new Date(a.fixture.date) - new Date(b.fixture.date))
                            .slice(0, 16);
-        // pido la PREDICCIÓN y las CUOTAS de la API solo para esos próximos (cachea, no gasta de más)
+        // PREDICCIÓN de la API solo para los PRÓXIMOS 6 (no quemar el límite por minuto). La cuota la calcula la app.
         const preds = {};
-        const odds  = {};
-        for(const f of upcoming){
+        for(const f of upcoming.slice(0, 6)){
           const id = f.fixture.id;
           try{
             const pr = await apiGet(`/predictions?fixture=${id}`, key);
             const p = pr[0]?.predictions;
             if(p) preds[id] = { home:p.percent?.home, draw:p.percent?.draw, away:p.percent?.away, advice:p.advice };
-          }catch(e){}
-          try{
-            const od = await apiGet(`/odds?fixture=${id}&league=${LEAGUE}&season=${SEASON}`, key);
-            const m = mapOdds(od);
-            if(m) odds[id] = m;
           }catch(e){}
         }
         fixtures = fx.map(f => {
@@ -311,7 +313,7 @@ export default {
             home: f.teams.home.name, away: f.teams.away.name,
             gh: f.goals.home, ga: f.goals.away,
             pred: preds[f.fixture.id] || null,
-            odds: odds[f.fixture.id] || null,
+            odds: null,
             players: up ? { home: scorersByTeam[hid] || [], away: scorersByTeam[aid] || [] } : null,
             bajas:   up ? { home: injByTeam[hid] || [],    away: injByTeam[aid] || [] }    : null
           };
@@ -323,17 +325,29 @@ export default {
       const body = JSON.stringify({ actualizado: new Date().toISOString(), conLlave: !!key, completo, dbg, elo, standings, fixtures });
 
       if(completo){
-        // resultado bueno: lo guardo 20 min
+        // resultado bueno: caché de borde (CACHE_MIN) + respaldo durable en KV (24 h)
         const toCache = new Response(body, { headers: { ...cors, "Cache-Control": `max-age=${CACHE_MIN*60}` } });
         await cache.put(cacheKey, toCache.clone());
+        try{ if(env.DATOS_KV) await env.DATOS_KV.put("datos", body, { expirationTtl: 86400 }); }catch(e){}
         return new Response(body, { headers: cors });
       }
 
-      // incompleto (probable límite por minuto): NO piso la caché.
-      // si tengo una versión buena guardada, la devuelvo en vez de una vacía.
+      // incompleto (límite de la API): sirvo el último respaldo BUENO que tenga.
       const prev = await cache.match(cacheKey);
       if(prev) return prev;
-      return new Response(body, { headers: { ...cors, "Cache-Control": "max-age=15" } });
+      // respaldo durable en KV: si ya cargó bien alguna vez, lo uso (y lo dejo en borde 10 min)
+      try{
+        if(env.DATOS_KV){
+          const saved = await env.DATOS_KV.get("datos");
+          if(saved){
+            const r = new Response(saved, { headers: { ...cors, "Cache-Control": "max-age=600" } });
+            await cache.put(cacheKey, r.clone());
+            return r;
+          }
+        }
+      }catch(e){}
+      // todavía no hay ningún respaldo bueno: espero 2 min antes de reintentar (no golpear la API)
+      return new Response(body, { headers: { ...cors, "Cache-Control": "max-age=120" } });
 
     }catch(e){
       return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 500, headers: cors });
