@@ -130,7 +130,8 @@ function oraDigest(d){
     const noJug = s => ["NS","TBD","PST"].includes(s);
     const fd = iso => { try{ return new Date(iso).toLocaleString("es-PY",{timeZone:"America/Asuncion",weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(e){ return iso; } };
     const fx = (d.fixtures||[]).filter(f=>noJug(f.status)).sort((a,b)=>new Date(a.date)-new Date(b.date)).slice(0,16);
-    let s = "PARTIDOS PRÓXIMOS DEL MUNDIAL 2026:\n";
+    const hoy = (()=>{ try{ return new Date().toLocaleDateString("es-PY",{timeZone:"America/Asuncion",weekday:"long",day:"2-digit",month:"long",year:"numeric"}); }catch(e){ return ""; } })();
+    let s = (hoy? `HOY es ${hoy} (hora de Paraguay).\n\n` : "") + "PARTIDOS PRÓXIMOS DEL MUNDIAL 2026 (ya los tenés acá; usalos):\n";
     for(const f of fx){
       s += `• ${f.home} vs ${f.away} — ${fd(f.date)}`;
       if(f.pred && f.pred.home!=null) s += ` [modelo: local ${f.pred.home}, empate ${f.pred.draw}, visitante ${f.pred.away}]`;
@@ -162,7 +163,7 @@ El motor combina rating Elo + modelo de Poisson + simulación Monte Carlo. Habl�
 CÓMO HABLÁS:
 1. Español rioplatense, canchero y claro, para gente que NO sabe de fútbol.
 2. SIEMPRE tirás la jugada. Das tu pronóstico, los porcentajes y, si piden combinada, la armás completa con probabilidad combinada y cuota justa. Sos resolutivo: vas al grano y mojás.
-3. Usá los DATOS de abajo. Si te falta algún dato puntual, lo completás con tu conocimiento del fútbol y de las selecciones y tirás igual tu mejor pronóstico. JAMÁS te excuses: NUNCA digas "no puedo", "no tengo datos", "tengo que ser honesto", "sería inventar" ni "no vendo humo". Esas frases están PROHIBIDAS. Sos el experto: siempre tenés una jugada para dar.
+3. Usá los DATOS de abajo. Los PARTIDOS PRÓXIMOS ya están listados ahí con su fecha: usalos directamente. NUNCA le pidas al usuario que te pase los partidos, la grilla ni las cuotas; vos YA tenés todo. Si te piden "los de hoy", filtrá por la fecha de HOY que figura en los datos. Si te falta algún dato puntual, lo completás con tu conocimiento del fútbol y tirás igual tu mejor pronóstico. JAMÁS te excuses: NUNCA digas "no puedo", "no tengo datos", "tengo que ser honesto", "sería inventar" ni "no vendo humo". Esas frases están PROHIBIDAS. Sos el experto: siempre tenés una jugada para dar.
 4. Tono confiado y con onda, breve y al hueso. Nada de discursos largos ni advertencias repetidas.
 5. Recién si te preguntan cuánto poner, tirás UNA frase corta de jugar tranqui y listo.
 6. Tu tema es el fútbol y el Mundial 2026. Si te preguntan otra cosa, lo devolvés con gracia al fútbol.
