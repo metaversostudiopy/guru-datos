@@ -24,6 +24,12 @@ const LEAGUE   = 1;      // Copa del Mundo en API-Football
 const SEASON   = 2026;
 const CACHE_MIN = 20;    // minutos de caché (cuidar el límite de pedidos)
 
+// ====== CANDADO DE SERVICIO ======
+// Fecha de vencimiento del servicio (formato AÑO-MES-DÍA).
+// Para renovar: cambiá SOLO esta fecha y subí el worker a GitHub.
+const VENCE = "2026-07-26";
+// ==================================
+
 // código de eloratings  ->  código FIFA del sistema
 const ELO2FIFA = {AR:"ARG",ES:"ESP",FR:"FRA",EN:"ENG",BR:"BRA",CO:"COL",PT:"POR",NL:"NED",DE:"GER",NO:"NOR",JP:"JPN",CH:"SUI",HR:"CRO",MX:"MEX",MA:"MAR",BE:"BEL",EC:"ECU",UY:"URU",AT:"AUT",US:"USA",SN:"SEN",PY:"PAR",TR:"TUR",AU:"AUS",DZ:"DZA",KR:"KOR",IR:"IRN",CA:"CAN",SQ:"SCO",EG:"EGY",CI:"CIV",SE:"SWE",CZ:"CZE",UZ:"UZB",PA:"PAN",CD:"COD",JO:"JOR",CV:"CPV",BA:"BIH",IQ:"IRQ",GH:"GHA",NZ:"NZL",ZA:"RSA",HT:"HTI",SA:"KSA",TN:"TUN",CW:"CUW",QA:"QAT"};
 
@@ -122,6 +128,13 @@ export default {
     const cors = { "Access-Control-Allow-Origin":"*", "content-type":"application/json; charset=utf-8" };
     const url = new URL(req.url);
     if(req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+    // Candado de servicio: la app lee la fecha de vencimiento de acá.
+    if(url.pathname === "/lic"){
+      return new Response(JSON.stringify({ vence: VENCE }), {
+        headers: { ...cors, "Cache-Control": "max-age=60" }
+      });
+    }
 
     if(url.pathname !== "/datos"){
       return new Response(JSON.stringify({ ok:true, uso:"GET /datos" }), { headers: cors });
