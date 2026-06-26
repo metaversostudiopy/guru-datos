@@ -123,11 +123,79 @@ function mapOdds(resp){
   return any ? out : null;
 }
 
+// ====== ORÁCULO IA (chat con Opus 4.8) ======
+// Resume los datos del torneo para pasárselos al modelo.
+function oraDigest(d){
+  try{
+    const noJug = s => ["NS","TBD","PST"].includes(s);
+    const fd = iso => { try{ return new Date(iso).toLocaleString("es-PY",{timeZone:"America/Asuncion",weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(e){ return iso; } };
+    const fx = (d.fixtures||[]).filter(f=>noJug(f.status)).sort((a,b)=>new Date(a.date)-new Date(b.date)).slice(0,16);
+    let s = "PARTIDOS PRÓXIMOS DEL MUNDIAL 2026:\n";
+    for(const f of fx){
+      s += `• ${f.home} vs ${f.away} — ${fd(f.date)}`;
+      if(f.pred && f.pred.home!=null) s += ` [modelo: local ${f.pred.home}, empate ${f.pred.draw}, visitante ${f.pred.away}]`;
+      if(f.odds && f.odds.r) s += ` [cuota casa: ${f.odds.r.h}/${f.odds.r.d}/${f.odds.r.a}]`;
+      s += "\n";
+      const gl = t => (t||[]).filter(p=>p&&p.n).slice(0,3).map(p=>`${p.n} (${p.g||0} goles, ${p.so||0}/${p.s||0} al arco)`).join(", ");
+      if(f.players){ const h=gl(f.players.home), a=gl(f.players.away); if(h) s+=`   Goleadores ${f.home}: ${h}\n`; if(a) s+=`   Goleadores ${f.away}: ${a}\n`; }
+    }
+    if(Array.isArray(d.standings) && d.standings.length){
+      s += "\nPOSICIONES (grupo · equipo · pts · G-E-P · GF-GC):\n";
+      for(const x of d.standings){ if(x.group && /group [a-l]/i.test(x.group)) s += `• ${x.group}: ${x.team} ${x.pts}pts (${x.w}-${x.d}-${x.l}) ${x.gf}-${x.ga}\n`; }
+    }
+    return s;
+  }catch(e){ return "(sin datos del torneo en este momento)"; }
+}
+function oraSystem(digest){
+  return `Sos «El Oráculo», el asistente de inteligencia artificial de Gurú Digital, ESPECIALIZADO EXCLUSIVAMENTE en el Mundial de Fútbol 2026.
+
+PERSONALIDAD: analista deportivo experto, claro y directo. NADA de misticismo, astros ni energías: solo fútbol, datos, números y jugadas.
+
+REGLAS:
+1. Respondé en español rioplatense, claro y para gente que NO sabe de fútbol.
+2. Tu tema es ÚNICAMENTE el fútbol y el Mundial 2026. Si te preguntan otra cosa, redirigí con amabilidad: "Soy El Oráculo de Gurú Digital, estoy para ayudarte con el Mundial 2026. ¿Qué partido o jugada querés analizar?".
+3. Podés PREDECIR partidos, ARMAR COMBINADAS y calcular PROBABILIDADES de la jugada que te pidan, usando los datos de abajo y tu conocimiento del fútbol.
+4. SIEMPRE hablás de PROBABILIDADES, nunca de certezas. Aclarás cuando corresponde que el fútbol no se acierta al 100%.
+5. Sé concreto: dá porcentajes y, para combinadas, multiplicá las probabilidades y mostrá la probabilidad combinada y la cuota justa (1 ÷ probabilidad).
+6. Te presentás siempre como El Oráculo de Gurú Digital; mantené el foco en el fútbol y no te desvíes a hablar de la tecnología que te impulsa.
+7. Si preguntan cuánto apostar, promové el juego responsable.
+
+DATOS ACTUALES DEL MUNDIAL 2026:
+${digest}`;
+}
+
 export default {
   async fetch(req, env){
-    const cors = { "Access-Control-Allow-Origin":"*", "content-type":"application/json; charset=utf-8" };
+    const cors = { "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Methods":"GET,POST,OPTIONS", "Access-Control-Allow-Headers":"content-type", "content-type":"application/json; charset=utf-8" };
     const url = new URL(req.url);
     if(req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+    // ====== CHAT del Oráculo (IA · Opus 4.8) ======
+    if(url.pathname === "/chat"){
+      if(req.method !== "POST") return new Response(JSON.stringify({ error:"usá POST" }), { status:405, headers: cors });
+      if(!env.ANTHROPIC_KEY) return new Response(JSON.stringify({ error:"Falta configurar la llave de IA (ANTHROPIC_KEY) en el Worker." }), { status:500, headers: cors });
+      let body; try{ body = await req.json(); }catch(e){ body = {}; }
+      const message = (body.message||"").toString().slice(0, 1500);
+      let history = Array.isArray(body.history) ? body.history.slice(-10) : [];
+      if(!message) return new Response(JSON.stringify({ error:"mensaje vacío" }), { status:400, headers: cors });
+      // datos del torneo para fundamentar la respuesta
+      let digest = "(sin datos)";
+      try{ const dr = await fetch(url.origin + "/datos"); const d = await dr.json(); digest = oraDigest(d); }catch(e){}
+      const messages = [...history.filter(m=>m && (m.role==="user"||m.role==="assistant") && m.content), { role:"user", content: message }];
+      try{
+        const ar = await fetch("https://api.anthropic.com/v1/messages", {
+          method:"POST",
+          headers:{ "content-type":"application/json", "x-api-key": env.ANTHROPIC_KEY, "anthropic-version":"2023-06-01" },
+          body: JSON.stringify({ model:"claude-opus-4-8", max_tokens:1024, system: oraSystem(digest), messages })
+        });
+        const aj = await ar.json();
+        if(aj.error) return new Response(JSON.stringify({ error: aj.error.message || "error de IA" }), { status:502, headers: cors });
+        const answer = (aj.content||[]).map(b=> b.type==="text" ? b.text : "").join("").trim();
+        return new Response(JSON.stringify({ answer: answer || "No pude generar una respuesta. Probá de nuevo." }), { headers: cors });
+      }catch(e){
+        return new Response(JSON.stringify({ error:"No se pudo consultar la IA: "+e }), { status:502, headers: cors });
+      }
+    }
 
     // Candado de servicio: la app lee la fecha de vencimiento de acá.
     if(url.pathname === "/lic"){
